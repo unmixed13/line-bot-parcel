@@ -5,54 +5,67 @@ const fs = require('fs');
 const app = express();
 app.use(bodyParser.json());
 
-// ========== ตั้งค่า ==========
+// ========== ตั้งค่า LINE Bot ==========
 const LINE_TOKEN = 'dH8P1oh9GQBtH0IJ3JBKcNe4aPzPRgTfmtjI3t2WDhe5uerlWcSCY4kyTSZYXtdr1XXqTLDKVxQmKuNbKnjQKZmzxP9LOMy+c92kMn+qvCVb9gANwsxzTAP9mrs1cmUAdDSCdDt44VID+WnImzqLKgdB04t89/1O/w1cDnyilFU=';
-const ADA_USER = 'smart_box_01';
-const ADA_KEY = 'aio_zNUe82LUvGmHURACFwo2QKfHA808';
-const FEED_CMD = 'parcel-box-cmd';
-const FEED_NOTIFY = 'parcel-box-notify';
 
-// ========== บันทึก/โหลด User IDs ==========
+// ========== เก็บคำสั่งล่าสุด (สำหรับ ESP32 มาดึง) ==========
+let lastCommand = null;
+
+// ========== เก็บ User IDs ==========
 const USER_FILE = './userIds.json';
-
-// โหลด userIds จากไฟล์ (ถ้ามี)
 let userIds = [];
+
 try {
   if (fs.existsSync(USER_FILE)) {
-    const data = fs.readFileSync(USER_FILE, 'utf8');
-    userIds = JSON.parse(data);
-    console.log(`✅ Loaded ${userIds.length} user(s) from file`);
+    userIds = JSON.parse(fs.readFileSync(USER_FILE, 'utf8'));
+    console.log(`✅ Loaded ${userIds.length} user(s)`);
   }
 } catch (err) {
   console.error('❌ Error loading users:', err.message);
 }
 
-// บันทึก userIds ลงไฟล์
 function saveUserIds() {
   try {
     fs.writeFileSync(USER_FILE, JSON.stringify(userIds, null, 2));
-    console.log(`💾 Saved ${userIds.length} user(s) to file`);
   } catch (err) {
     console.error('❌ Error saving users:', err.message);
   }
 }
 
-// เพิ่ม userId ใหม่ (ถ้ายังไม่มี)
 function addUser(userId) {
   if (!userIds.includes(userId)) {
     userIds.push(userId);
     saveUserIds();
-    console.log(`➕ New user added: ${userId}`);
-    return true;
+    console.log(`➕ New user: ${userId}`);
   }
-  return false;
 }
 
 // ========== Routes ==========
+
+// หน้าหลัก
 app.get('/', (req, res) => {
-  res.send('✅ LINE Bot is running!');
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Smart Parcel Box</title>
+      <style>
+        body { font-family: Arial; text-align: center; padding: 50px; background: #667eea; color: white; }
+        h1 { font-size: 3em; }
+      </style>
+    </head>
+    <body>
+      <h1>✅ LINE Bot is running!</h1>
+      <p>Smart Parcel Box System</p>
+      <p>Users: ${userIds.length}</p>
+      <p>Last Command: ${lastCommand || 'None'}</p>
+    </body>
+    </html>
+  `);
 });
 
+// รับคำสั่งจาก LINE
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
   
@@ -66,43 +79,61 @@ app.post('/webhook', async (req, res) => {
     const text = event.message.text.trim().toUpperCase();
     const userId = event.source.userId;
     
-    // เพิ่ม user เข้าระบบ
     addUser(userId);
     
     let message = '';
     
     if (text === 'OPEN') {
-      await sendToAdafruit(FEED_CMD, 1);
-      message = '📦 เปิดกล่องเรียบร้อย!';
+      lastCommand = 'OPEN';
+      message = '📦 ส่งคำสั่งเปิดกล่องแล้ว!';
+      console.log('📨 Command: OPEN');
     } else if (text === 'CLOSE') {
-      await sendToAdafruit(FEED_CMD, 0);
-      message = '🔒 ปิดกล่องเรียบร้อย!';
+      lastCommand = 'CLOSE';
+      message = '🔒 ส่งคำสั่งปิดกล่องแล้ว!';
+      console.log('📨 Command: CLOSE');
     } else if (text === 'STATUS') {
-      const status = await getFromAdafruit(FEED_NOTIFY);
-      message = `📊 สถานะ: ${status}`;
+      message = `📊 สถานะ:\n• ผู้ใช้: ${userIds.length} คน\n• คำสั่งล่าสุด: ${lastCommand || 'ไม่มี'}`;
     } else {
-      message = '💡 คำสั่ง: OPEN / CLOSE / STATUS';
+      message = '💡 คำสั่งที่ใช้ได้:\n• OPEN - เปิดกล่อง\n• CLOSE - ปิดกล่อง\n• STATUS - ดูสถานะ';
     }
     
     await replyMessage(replyToken, message);
   }
 });
 
-// Sensor แจ้งเตือน → ส่งหาทุกคน
+// ESP32 เช็คคำสั่ง (ดึงคำสั่งล่าสุด)
+app.get('/command', (req, res) => {
+  if (lastCommand) {
+    const cmd = lastCommand;
+    lastCommand = null; // ล้างคำสั่งหลังส่งแล้ว
+    console.log(`📤 Sent command to ESP32: ${cmd}`);
+    res.send(cmd);
+  } else {
+    res.send(''); // ไม่มีคำสั่งใหม่
+  }
+});
+
+// รับการแจ้งเตือนจาก ESP32
 app.get('/sensor', async (req, res) => {
   res.send('OK');
   
-  if (req.query.notify) {
-    const notifyMessage = `🔔 มีพัสดุส่งมาถึงแล้ว!\n📦 กรุณามารับพัสดุที่กล่อง Smart Parcel Box\n\n⏰ ${new Date().toLocaleString('th-TH')}`;
+  if (req.query.notify && userIds.length > 0) {
+    const event = req.query.notify;
+    let message = '';
     
-    console.log(`\n📤 Sending notification to ${userIds.length} user(s)...`);
-    
-    // ส่งหาทุกคนในระบบ
-    for (const uid of userIds) {
-      await pushMessage(uid, notifyMessage);
+    if (event === 'detected') {
+      message = '🔔 มีพัสดุส่งมาถึงแล้ว!\n📦 กรุณามารับพัสดุ\n\n⏰ ' + new Date().toLocaleString('th-TH');
+    } else if (event === 'removed') {
+      message = '✅ พัสดุถูกหยิบออกแล้ว\n\n⏰ ' + new Date().toLocaleString('th-TH');
     }
     
-    console.log('✅ Notification sent to all users');
+    if (message) {
+      console.log(`\n📤 Sending to ${userIds.length} user(s): ${event}`);
+      
+      for (const uid of userIds) {
+        await pushMessage(uid, message);
+      }
+    }
   }
 });
 
@@ -135,36 +166,9 @@ async function pushMessage(uid, text) {
         'Content-Type': 'application/json'
       }
     });
-    console.log(`✅ Push sent to ${uid}`);
+    console.log(`✅ Pushed to ${uid}`);
   } catch (err) {
-    console.error(`❌ Push error to ${uid}:`, err.message);
-  }
-}
-
-// ========== Adafruit Functions ==========
-async function sendToAdafruit(feed, value) {
-  try {
-    await axios.post(
-      `https://io.adafruit.com/api/v2/${ADA_USER}/feeds/${feed}/data`,
-      { value: value },
-      { headers: { 'X-AIO-Key': ADA_KEY, 'Content-Type': 'application/json' } }
-    );
-    console.log(`✅ Sent to Adafruit: ${feed} = ${value}`);
-  } catch (err) {
-    console.error('❌ Adafruit send error:', err.message);
-  }
-}
-
-async function getFromAdafruit(feed) {
-  try {
-    const res = await axios.get(
-      `https://io.adafruit.com/api/v2/${ADA_USER}/feeds/${feed}/data/last`,
-      { headers: { 'X-AIO-Key': ADA_KEY } }
-    );
-    return res.data.value || 'ไม่มีข้อมูล';
-  } catch (err) {
-    console.error('❌ Adafruit get error:', err.message);
-    return 'ไม่สามารถดึงข้อมูลได้';
+    console.error(`❌ Push error:`, err.message);
   }
 }
 
@@ -172,7 +176,10 @@ async function getFromAdafruit(feed) {
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`\n╔════════════════════════════════════╗`);
-  console.log(`║  ✅ Server running on port ${PORT}  ║`);
-  console.log(`║  👥 Users loaded: ${userIds.length}              ║`);
+  console.log(`║    🎉 Smart Parcel Box Server     ║`);
+  console.log(`╠════════════════════════════════════╣`);
+  console.log(`║  Port: ${PORT}                       ║`);
+  console.log(`║  Users: ${userIds.length}                          ║`);
+  console.log(`║  Adafruit IO: ❌ Disabled          ║`);
   console.log(`╚════════════════════════════════════╝\n`);
 });
