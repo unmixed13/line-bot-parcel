@@ -1,16 +1,21 @@
 // line.js
 const axios = require('axios');
+const crypto = require('crypto');
+const config = require('./config');
 
-const LINE_TOKEN = 'dH8P1oh9GQBtH0IJ3JBKcNe4aPzPRgTfmtjI3t2WDhe5uerlWcSCY4kyTSZYXtdr1XXqTLDKVxQmKuNbKnjQKZmzxP9LOMy+c92kMn+qvCVb9gANwsxzTAP9mrs1cmUAdDSCdDt44VID+WnImzqLKgdB04t89/1O/w1cDnyilFU=';
+const client = axios.create({
+  baseURL: 'https://api.line.me/v2/bot/message',
+  timeout: 8000,
+  headers: {
+    Authorization: `Bearer ${config.line.channelAccessToken}`,
+    'Content-Type': 'application/json',
+  },
+});
 
 // ส่งข้อความตอบกลับ LINE
 async function replyMessage(replyToken, text) {
   try {
-    const res = await axios.post(
-      'https://api.line.me/v2/bot/message/reply',
-      { replyToken, messages: [{ type: 'text', text }] },
-      { headers: { 'Authorization': `Bearer ${LINE_TOKEN}`, 'Content-Type': 'application/json' } }
-    );
+    await client.post('/reply', { replyToken, messages: [{ type: 'text', text }] });
     console.log('✅ Replied to LINE:', text);
   } catch (err) {
     console.error('❌ LINE reply error:', err.response?.status, err.response?.data || err.message);
@@ -20,15 +25,28 @@ async function replyMessage(replyToken, text) {
 // ส่งข้อความ push LINE
 async function pushMessage(uid, text) {
   try {
-    const res = await axios.post(
-      'https://api.line.me/v2/bot/message/push',
-      { to: uid, messages: [{ type: 'text', text }] },
-      { headers: { 'Authorization': `Bearer ${LINE_TOKEN}`, 'Content-Type': 'application/json' } }
-    );
+    await client.post('/push', { to: uid, messages: [{ type: 'text', text }] });
     console.log('✅ Pushed LINE message:', text);
   } catch (err) {
     console.error('❌ LINE push error:', err.response?.status, err.response?.data || err.message);
   }
 }
 
-module.exports = { replyMessage, pushMessage };
+// ตรวจลายเซ็น X-Line-Signature เพื่อยืนยันว่า webhook มาจาก LINE จริง
+// คืนค่า true ทันทีถ้าไม่ได้ตั้ง LINE_CHANNEL_SECRET ไว้ (มี warning ตอนบูตแล้ว)
+function isValidSignature(rawBody, signature) {
+  if (!config.line.channelSecret) return true;
+  if (!signature || !rawBody) return false;
+
+  const expected = crypto
+    .createHmac('sha256', config.line.channelSecret)
+    .update(rawBody)
+    .digest('base64');
+
+  const expectedBuf = Buffer.from(expected);
+  const providedBuf = Buffer.from(signature);
+  if (expectedBuf.length !== providedBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, providedBuf);
+}
+
+module.exports = { replyMessage, pushMessage, isValidSignature };

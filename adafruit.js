@@ -1,16 +1,27 @@
-// adafruit.js
+// adafruit.js — optional Adafruit IO integration (not wired into index.js by default)
 const axios = require('axios');
+const config = require('./config');
 
-const ADA_USER = 'smart_box_01';
-const ADA_KEY = 'aio_zNUe82LUvGmHURACFwo2QKfHA808';
+const client = axios.create({
+  baseURL: 'https://io.adafruit.com/api/v2',
+  timeout: 8000,
+});
+
+function isConfigured() {
+  return Boolean(config.adafruit.username && config.adafruit.key);
+}
 
 // ส่งค่าไป Adafruit feed
 async function sendToAdafruit(feed, value) {
+  if (!isConfigured()) {
+    console.warn('⚠️  Adafruit IO not configured (ADAFRUIT_IO_USERNAME/ADAFRUIT_IO_KEY); skipping send.');
+    return;
+  }
   try {
-    const res = await axios.post(
-      `https://io.adafruit.com/api/v2/${ADA_USER}/feeds/${feed}/data`,
+    const res = await client.post(
+      `/${config.adafruit.username}/feeds/${feed}/data`,
       { value },
-      { headers: { 'X-AIO-Key': ADA_KEY, 'Content-Type': 'application/json' } }
+      { headers: { 'X-AIO-Key': config.adafruit.key, 'Content-Type': 'application/json' } }
     );
     console.log(`✅ Sent to Adafruit [${feed}]:`, value, res.data);
   } catch (err) {
@@ -20,11 +31,14 @@ async function sendToAdafruit(feed, value) {
 
 // ดึงค่า feed ล่าสุดจาก Adafruit
 async function getFromAdafruit(feed) {
+  if (!isConfigured()) {
+    console.warn('⚠️  Adafruit IO not configured (ADAFRUIT_IO_USERNAME/ADAFRUIT_IO_KEY); skipping fetch.');
+    return 'ไม่สามารถดึงข้อมูลได้';
+  }
   try {
-    const res = await axios.get(
-      `https://io.adafruit.com/api/v2/${ADA_USER}/feeds/${feed}/data/last`,
-      { headers: { 'X-AIO-Key': ADA_KEY } }
-    );
+    const res = await client.get(`/${config.adafruit.username}/feeds/${feed}/data/last`, {
+      headers: { 'X-AIO-Key': config.adafruit.key },
+    });
     console.log(`✅ Adafruit response [${feed}]:`, res.data);
     return res.data.value || 'ไม่มีข้อมูล';
   } catch (err) {
