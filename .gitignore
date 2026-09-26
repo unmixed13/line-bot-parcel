@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.*.local
+userIds.json
+*.log
+npm-debug.log*
+
+# --- Python backend (smart_iot_parcel_box) ---
+smart_iot_parcel_box/venv/
+smart_iot_parcel_box/**/__pycache__/
+smart_iot_parcel_box/.env
+smart_iot_parcel_box/.env.backup
+smart_iot_parcel_box/*.db
+smart_iot_parcel_box/uploads/*
+!smart_iot_parcel_box/uploads/.gitkeep
