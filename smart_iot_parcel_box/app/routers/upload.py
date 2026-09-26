@@ -9,6 +9,7 @@ Security notes:
   mid-stream, so a device can't exhaust disk space with an oversized body.
 """
 import logging
+import re
 import uuid
 from pathlib import Path
 
@@ -63,6 +64,9 @@ async def upload_image(
       - event_type: optional, defaults to "image_capture"
       - file: the JPEG/PNG image
     """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", device_id):
+        raise UnsupportedFileTypeError("Invalid device_id")
+
     if file.content_type not in _ALLOWED_CONTENT_TYPES:
         raise UnsupportedFileTypeError(
             f"Content-Type '{file.content_type}' is not an accepted image type"
